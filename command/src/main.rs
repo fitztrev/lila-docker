@@ -1,4 +1,7 @@
+use std::process::Command;
+
 use cliclack::{confirm, input, intro, multiselect};
+use git2::Repository;
 
 const BANNER: &str = r#"
    |\_    _ _      _
@@ -9,9 +12,39 @@ const BANNER: &str = r#"
                                                    |___/
 "#;
 
-const ENV_PATH: &str = "/.env";
+const LICHESS_REPOS: [&str; 13] = [
+    "lila",
+    "lila-ws",
+    "lila-db-seed",
+    "lila-engine",
+    "lila-fishnet",
+    "lila-gif",
+    "lila-search",
+    "lifat",
+    "scalachess",
+    "api",
+    "pgn-viewer",
+    "chessground",
+    "berserk",
+];
 
 fn main() -> std::io::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 2 {
+        println!("Usage: lila-docker <start|stop|down|resume>");
+        return Ok(());
+    }
+
+    match args[1].as_str() {
+        "start" => start()?,
+        _ => println!("Invalid command"),
+    }
+
+    Ok(())
+}
+
+fn start() -> std::io::Result<()> {
     intro(BANNER)?;
 
     let profiles = multiselect("Select which optional services to run")
@@ -44,7 +77,7 @@ fn main() -> std::io::Result<()> {
         .initial_value(true)
         .interact()?;
 
-    let (su_password, password) = if setup_database {
+    let (_su_password, _password) = if setup_database {
         (
             input("Choose a password for admin users (blank for 'password')")
                 .placeholder("password")
@@ -61,21 +94,69 @@ fn main() -> std::io::Result<()> {
         (String::from(""), String::from(""))
     };
 
-    let env_contents = format!(
-        "COMPOSE_PROFILES={}\nSETUP_DB={}\nSU_PASSWORD={}\nPASSWORD={}\n",
-        profiles.join(","),
-        setup_database,
-        su_password,
-        password
-    );
+    for repo in LICHESS_REPOS.iter() {
+        let repo_url = format!("https://github.com/lichess-org/{}.git", repo);
+        Repository::clone(
+            repo_url.as_str(),
+            format!("/home/trevor/code/lila-docker/repos/{}", repo),
+        )
+        .ok();
+    }
 
-    match std::fs::metadata(ENV_PATH) {
-        Ok(_) => {
-            std::fs::write(ENV_PATH, env_contents)?;
-        }
-        Err(_) => {
-            println!(".env contents:\n{}", env_contents);
-        }
+    cliclack::log::remark("Building Docker images...")?;
+    let mut compose = Command::new("docker");
+    compose.arg("compose");
+    for profile in profiles.iter() {
+        compose.arg("--profile").arg(profile);
+    }
+    match compose.arg("build").status() {
+        Ok(_) => println!("Successfully built images"),
+        Err(_) => println!("Failed to build images"),
+    }
+
+    cliclack::log::remark("Compiling lila js/css...")?;
+    match Command::new("docker")
+        .arg("compose")
+        .arg("run")
+        .arg("--rm")
+        .arg("ui")
+        .arg("bash")
+        .arg("-c")
+        .arg("/lila/ui/build")
+        .status()
+    {
+        Ok(_) => println!("Successfully built UI"),
+        Err(_) => println!("Failed to build UI"),
+    }
+
+    cliclack::log::remark("Compiling chessground...")?;
+    match Command::new("docker")
+        .arg("compose")
+        .arg("run")
+        .arg("--rm")
+        .arg("ui")
+        .arg("bash")
+        .arg("-c")
+        .arg("cd /chessground && pnpm install && pnpm run compile")
+        .status()
+    {
+        Ok(_) => println!("Successfully built chessground"),
+        Err(_) => println!("Failed to build chessground"),
+    }
+
+    cliclack::log::remark("Starting services...")?;
+    let mut compose = Command::new("docker");
+    compose.arg("compose");
+    for profile in profiles.iter() {
+        compose.arg("--profile").arg(profile);
+    }
+    match compose.arg("up").arg("-d").status() {
+        Ok(_) => println!("Successfully started services"),
+        Err(_) => println!("Failed to start services"),
+    }
+
+    if setup_database {
+        // setup database
     }
 
     Ok(())

@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 cliclack = "0.1.6"
+git2 = "0.18.0"
