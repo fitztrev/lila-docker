@@ -1,6 +1,11 @@
+use std::{path::PathBuf, process::Command};
+
 use std::io::Error;
 
-use cliclack::{confirm, input, intro, multiselect};
+use cliclack::{confirm, input, intro, log, multiselect, spinner};
+use git2::Repository;
+use home::home_dir;
+use serde::{Deserialize, Serialize};
 use strum::{EnumIter, EnumString, IntoEnumIterator};
 
 const BANNER: &str = r"
@@ -12,7 +17,34 @@ const BANNER: &str = r"
                                                    |___/
 ";
 
-const ENV_PATH: &str = "/.env";
+#[derive(Debug, Serialize, Deserialize)]
+struct Config {
+    repos_dir: String,
+    profiles: Vec<String>,
+    setup_database: bool,
+    su_password: String,
+    password: String,
+}
+
+const LICHESS_REPOS: [&str; 13] = [
+    "lichess-org/lila",
+    "lichess-org/lila-ws",
+    "lichess-org/lila-db-seed",
+    "lichess-org/lila-engine",
+    "lichess-org/lila-fishnet",
+    "lichess-org/lila-gif",
+    "lichess-org/lila-search",
+    "lichess-org/lifat",
+    "lichess-org/scalachess",
+    "lichess-org/api",
+    "lichess-org/pgn-viewer",
+    "lichess-org/chessground",
+    "lichess-org/berserk",
+];
+
+fn path_to_config_file() -> PathBuf {
+    home_dir().unwrap().join(".lila-docker")
+}
 
 #[derive(Default, Clone, Eq, PartialEq, Debug)]
 struct OptionalService {
@@ -56,6 +88,23 @@ enum Repository {
 }
 
 fn main() -> std::io::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 2 {
+        intro(BANNER)?;
+        println!("Usage: lila-docker <start|stop|down|resume>");
+        return Ok(());
+    }
+
+    match args[1].as_str() {
+        "start" => start()?,
+        _ => println!("Invalid command"),
+    }
+
+    Ok(())
+}
+
+fn start() -> std::io::Result<()> {
     intro(BANNER)?;
 
     let services = prompt_for_optional_services()?;
@@ -79,59 +128,83 @@ fn main() -> std::io::Result<()> {
                 .interact()?,
         )
     } else {
-        (String::new(), String::new())
+        (String::from(""), String::from(""))
     };
 
-    let env_contents = [
-        format!(
-            "DIRS={}",
-            Repository::iter()
-                .map(|repo| repo.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        format!(
-            "REPOS={}",
-            [
-                vec![
-                    Repository::Lila,
-                    Repository::LilaWs,
-                    Repository::LilaDbSeed,
-                    Repository::Lifat,
-                ],
-                services
-                    .iter()
-                    .filter_map(|service| service.repositories.clone())
-                    .flatten()
-                    .collect::<Vec<_>>(),
-            ]
-            .concat()
-            .iter()
-            .map(std::string::ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(",")
-        ),
-        format!(
-            "COMPOSE_PROFILES={}",
-            services
-                .iter()
-                .filter_map(|service| service.compose_profile.clone())
-                .collect::<Vec<_>>()
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        format!("SETUP_DB={setup_database}"),
-        format!("SU_PASSWORD={su_password}"),
-        format!("PASSWORD={password}"),
-    ]
-    .join("\n");
+    let default_repos_location = home_dir().unwrap().join("lila-docker");
+    let repos_dir: String = input("Where do you want the repos cloned?")
+        .placeholder(default_repos_location.to_str().unwrap())
+        .default_input(default_repos_location.to_str().unwrap())
+        .required(true)
+        .interact()?;
 
-    match std::fs::metadata(ENV_PATH) {
-        Ok(_) => std::fs::write(ENV_PATH, env_contents)?,
-        Err(_) => println!(".env contents:\n{env_contents}"),
+    let config = Config {
+        repos_dir,
+        profiles: profiles.iter().map(|s| s.to_string()).collect(),
+        setup_database,
+        su_password,
+        password,
+    };
+
+    let contents = toml::to_string(&config).unwrap();
+    std::fs::write(path_to_config_file(), contents)?;
+
+    log::success("Wrote config file to ~/.lila-docker")?;
+
+    for repo in LICHESS_REPOS.iter() {
+        let repo_url = format!("https://github.com/{}.git", repo);
+
+        let mut progress = spinner();
+        progress.start(format!("Cloning {}...", repo));
+        Repository::clone(
+            repo_url.as_str(),
+            format!("{}/{}", config.repos_dir, repo).as_str(),
+        )
+        .ok();
+        progress.stop(format!("Cloned {}", repo));
     }
+
+    log::info("Initializing submodules...")?;
+    let mut submodule = Command::new("git");
+    submodule
+        .arg("-C")
+        .arg(format!("{}/lichess-org/lila", config.repos_dir))
+        .arg("submodule")
+        .arg("update")
+        .arg("--init");
+    match submodule.status() {
+        Ok(_) => log::success("Initialized submodules")?,
+        Err(_) => log::error("Failed to initialize submodules")?,
+    }
+
+    log::info("Building Docker images...")?;
+    let mut compose = Command::new("docker");
+    compose.arg("compose");
+    for profile in profiles.iter() {
+        compose.arg("--profile").arg(profile);
+    }
+    match compose.arg("build").status() {
+        Ok(_) => log::success("Built Docker images")?,
+        Err(_) => log::error("Failed to build Docker images")?,
+    }
+
+    log::info("Compiling lila js/css...")?;
+    match Command::new("docker")
+        .arg("compose")
+        .arg("run")
+        .arg("--rm")
+        .arg("ui")
+        .arg("bash")
+        .arg("-c")
+        .arg("/lila/ui/build")
+        .status()
+    {
+        Ok(_) => log::success("Successfully built UI")?,
+        Err(_) => log::error("Failed to build UI")?,
+    }
+
+    // let parsed = toml::from_str::<Config>(&contents).unwrap();
+    // println!("parsed: {:?}", parsed);
 
     Ok(())
 }
