@@ -20,27 +20,12 @@ const BANNER: &str = r"
 #[derive(Debug, Serialize, Deserialize)]
 struct Config {
     repos_dir: String,
+    repos: Vec<String>,
     profiles: Vec<String>,
     setup_database: bool,
     su_password: String,
     password: String,
 }
-
-const LICHESS_REPOS: [&str; 13] = [
-    "lichess-org/lila",
-    "lichess-org/lila-ws",
-    "lichess-org/lila-db-seed",
-    "lichess-org/lila-engine",
-    "lichess-org/lila-fishnet",
-    "lichess-org/lila-gif",
-    "lichess-org/lila-search",
-    "lichess-org/lifat",
-    "lichess-org/scalachess",
-    "lichess-org/api",
-    "lichess-org/pgn-viewer",
-    "lichess-org/chessground",
-    "lichess-org/berserk",
-];
 
 fn path_to_config_file() -> PathBuf {
     home_dir().unwrap().join(".lila-docker")
@@ -48,8 +33,8 @@ fn path_to_config_file() -> PathBuf {
 
 #[derive(Default, Clone, Eq, PartialEq, Debug)]
 struct OptionalService {
-    compose_profile: Option<ComposeProfile>,
-    repositories: Option<Vec<Repository>>,
+    profile: Option<ComposeProfile>,
+    repos: Option<Vec<Repo>>,
 }
 
 #[derive(Debug, Clone, PartialEq, EnumString, strum::Display, Eq, EnumIter)]
@@ -68,7 +53,7 @@ enum ComposeProfile {
 
 #[derive(Debug, Clone, PartialEq, EnumString, strum::Display, Eq, EnumIter)]
 #[strum(serialize_all = "kebab-case")]
-enum Repository {
+enum Repo {
     Lila,
     LilaWs,
     LilaDbSeed,
@@ -87,18 +72,22 @@ enum Repository {
     BbpPairings,
 }
 
+fn show_help() {
+    println!("Usage: lila-docker <start|stop|down|resume>");
+}
+
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
         intro(BANNER)?;
-        println!("Usage: lila-docker <start|stop|down|resume>");
+        show_help();
         return Ok(());
     }
 
     match args[1].as_str() {
         "start" => start()?,
-        _ => println!("Invalid command"),
+        _ => show_help(),
     }
 
     Ok(())
@@ -140,71 +129,81 @@ fn start() -> std::io::Result<()> {
 
     let config = Config {
         repos_dir,
-        profiles: profiles.iter().map(|s| s.to_string()).collect(),
+        repos: services
+            .iter()
+            .filter_map(|service| service.repos.clone())
+            .flatten()
+            .map(|repo| repo.to_string())
+            .collect(),
+        profiles: services
+            .iter()
+            .filter_map(|service| service.profile.clone())
+            .map(|profile| profile.to_string())
+            .collect(),
         setup_database,
         su_password,
         password,
     };
 
     let contents = toml::to_string(&config).unwrap();
-    std::fs::write(path_to_config_file(), contents)?;
+    std::fs::write(path_to_config_file(), &contents)?;
 
     log::success("Wrote config file to ~/.lila-docker")?;
 
-    for repo in LICHESS_REPOS.iter() {
-        let repo_url = format!("https://github.com/{}.git", repo);
+    // for repo in LICHESS_REPOS.iter() {
+    //     let repo_url = format!("https://github.com/{}.git", repo);
 
-        let mut progress = spinner();
-        progress.start(format!("Cloning {}...", repo));
-        Repository::clone(
-            repo_url.as_str(),
-            format!("{}/{}", config.repos_dir, repo).as_str(),
-        )
-        .ok();
-        progress.stop(format!("Cloned {}", repo));
-    }
+    //     let mut progress = spinner();
+    //     progress.start(format!("Cloning {}...", repo));
+    //     Repo::clone(
+    //         repo_url.as_str(),
+    //         format!("{}/{}", config.repos_dir, repo).as_str(),
+    //     )
+    //     .ok();
+    //     progress.stop(format!("Cloned {}", repo));
+    // }
 
-    log::info("Initializing submodules...")?;
-    let mut submodule = Command::new("git");
-    submodule
-        .arg("-C")
-        .arg(format!("{}/lichess-org/lila", config.repos_dir))
-        .arg("submodule")
-        .arg("update")
-        .arg("--init");
-    match submodule.status() {
-        Ok(_) => log::success("Initialized submodules")?,
-        Err(_) => log::error("Failed to initialize submodules")?,
-    }
+    // log::info("Initializing submodules...")?;
+    // let mut submodule = Command::new("git");
+    // submodule
+    //     .arg("-C")
+    //     .arg(format!("{}/lichess-org/lila", config.repos_dir))
+    //     .arg("submodule")
+    //     .arg("update")
+    //     .arg("--init");
+    // match submodule.status() {
+    //     Ok(_) => log::success("Initialized submodules")?,
+    //     Err(_) => log::error("Failed to initialize submodules")?,
+    // }
 
-    log::info("Building Docker images...")?;
-    let mut compose = Command::new("docker");
-    compose.arg("compose");
-    for profile in profiles.iter() {
-        compose.arg("--profile").arg(profile);
-    }
-    match compose.arg("build").status() {
-        Ok(_) => log::success("Built Docker images")?,
-        Err(_) => log::error("Failed to build Docker images")?,
-    }
+    // log::info("Building Docker images...")?;
+    // let mut compose = Command::new("docker");
+    // compose.arg("compose");
+    // for profile in profiles.iter() {
+    //     compose.arg("--profile").arg(profile);
+    // }
+    // match compose.arg("build").status() {
+    //     Ok(_) => log::success("Built Docker images")?,
+    //     Err(_) => log::error("Failed to build Docker images")?,
+    // }
 
-    log::info("Compiling lila js/css...")?;
-    match Command::new("docker")
-        .arg("compose")
-        .arg("run")
-        .arg("--rm")
-        .arg("ui")
-        .arg("bash")
-        .arg("-c")
-        .arg("/lila/ui/build")
-        .status()
-    {
-        Ok(_) => log::success("Successfully built UI")?,
-        Err(_) => log::error("Failed to build UI")?,
-    }
+    // log::info("Compiling lila js/css...")?;
+    // match Command::new("docker")
+    //     .arg("compose")
+    //     .arg("run")
+    //     .arg("--rm")
+    //     .arg("ui")
+    //     .arg("bash")
+    //     .arg("-c")
+    //     .arg("/lila/ui/build")
+    //     .status()
+    // {
+    //     Ok(_) => log::success("Successfully built UI")?,
+    //     Err(_) => log::error("Failed to build UI")?,
+    // }
 
-    // let parsed = toml::from_str::<Config>(&contents).unwrap();
-    // println!("parsed: {:?}", parsed);
+    let parsed = toml::from_str::<Config>(&contents).unwrap();
+    println!("parsed: {:?}", parsed);
 
     Ok(())
 }
@@ -216,104 +215,104 @@ fn prompt_for_optional_services() -> Result<Vec<OptionalService>, Error> {
     .required(false)
     .item(
         OptionalService {
-            compose_profile: Some(ComposeProfile::StockfishPlay),
-            repositories: vec![Repository::LilaFishnet].into(),
+            profile: Some(ComposeProfile::StockfishPlay),
+            repos: vec![Repo::LilaFishnet].into(),
         },
         "Stockfish Play",
         "for playing against the computer",
     )
     .item(
         OptionalService {
-            compose_profile: Some(ComposeProfile::StockfishAnalysis),
-            repositories: None,
+            profile: Some(ComposeProfile::StockfishAnalysis),
+            repos: None,
         },
         "Stockfish Analysis",
         "for requesting computer analysis of games",
     )
     .item(
         OptionalService {
-            compose_profile: Some(ComposeProfile::ExternalEngine),
-            repositories: vec![Repository::LilaEngine].into(),
+            profile: Some(ComposeProfile::ExternalEngine),
+            repos: vec![Repo::LilaEngine].into(),
         },
         "External Engine",
         "for connecting a local chess engine to the analysis board",
     )
     .item(
         OptionalService {
-            compose_profile: Some(ComposeProfile::Search),
-            repositories: vec![Repository::LilaSearch].into(),
+            profile: Some(ComposeProfile::Search),
+            repos: vec![Repo::LilaSearch].into(),
         },
         "Search",
         "for searching games, forum posts, etc",
     )
     .item(
         OptionalService {
-            compose_profile: Some(ComposeProfile::Gifs),
-            repositories: vec![Repository::LilaGif].into(),
+            profile: Some(ComposeProfile::Gifs),
+            repos: vec![Repo::LilaGif].into(),
         },
         "GIFs",
         "for generating animated GIFs of games",
     )
     .item(
         OptionalService {
-            compose_profile: Some(ComposeProfile::Thumbnails),
-            repositories: None,
+            profile: Some(ComposeProfile::Thumbnails),
+            repos: None,
         },
         "Thumbnail generator",
         "for resizing blog/streamer images",
     )
     .item(
         OptionalService {
-            compose_profile: Some(ComposeProfile::ApiDocs),
-            repositories: vec![Repository::Api].into(),
+            profile: Some(ComposeProfile::ApiDocs),
+            repos: vec![Repo::Api].into(),
         },
         "API docs",
         "standalone API documentation",
     )
     .item(
         OptionalService {
-            compose_profile: Some(ComposeProfile::Chessground),
-            repositories: vec![Repository::Chessground].into(),
+            profile: Some(ComposeProfile::Chessground),
+            repos: vec![Repo::Chessground].into(),
         },
         "Chessground",
         "standalone board UI",
     )
     .item(
         OptionalService {
-            compose_profile: Some(ComposeProfile::PgnViewer),
-            repositories: vec![Repository::PgnViewer].into(),
+            profile: Some(ComposeProfile::PgnViewer),
+            repos: vec![Repo::PgnViewer].into(),
         },
         "PGN Viewer",
         "standalone PGN viewer",
     )
     .item(
         OptionalService {
-            compose_profile: None,
-            repositories: vec![Repository::Scalachess].into(),
+            profile: None,
+            repos: vec![Repo::Scalachess].into(),
         },
         "Scalachess",
         "standalone chess logic library",
     )
     .item(
         OptionalService {
-            compose_profile: None,
-            repositories: vec![Repository::Dartchess].into(),
+            profile: None,
+            repos: vec![Repo::Dartchess].into(),
         },
         "Dartchess",
         "standalone chess library for mobile platforms",
     )
     .item(
         OptionalService {
-            compose_profile: None,
-            repositories: vec![Repository::Berserk].into(),
+            profile: None,
+            repos: vec![Repo::Berserk].into(),
         },
         "Berserk",
         "Python API client",
     )
     .item(
         OptionalService {
-            compose_profile: None,
-            repositories: vec![Repository::BbpPairings].into(),
+            profile: None,
+            repos: vec![Repo::BbpPairings].into(),
         },
         "Swiss Pairings",
         "bbpPairings tool",
