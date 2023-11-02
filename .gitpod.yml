@@ -3,8 +3,10 @@ tasks:
       ./lila-docker build
       git clone --depth 1 --origin upstream https://github.com/lichess-org/lila repos/lila
       git clone --depth 1 --origin upstream https://github.com/lichess-org/lila-ws repos/lila-ws
+      git clone --depth 1 --origin upstream https://github.com/lichess-org/lila-db-seed repos/lila-db-seed
       git clone --depth 1 --origin upstream https://github.com/lichess-org/lifat repos/lifat
       git -C repos/lila submodule update --init
+      docker compose run --rm -it lila_docker_rs bash -c "cargo build --manifest-path /mnt/Cargo.toml"
   - command: |
       ./lila-docker start
       ./lila-docker gitpod-welcome
