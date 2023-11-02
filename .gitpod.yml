@@ -1,6 +1,10 @@
 tasks:
   - init: |
       ./lila-docker build
+      git clone --depth 1 --origin upstream https://github.com/lichess-org/lila repos/lila
+      git clone --depth 1 --origin upstream https://github.com/lichess-org/lila-ws repos/lila-ws
+      git clone --depth 1 --origin upstream https://github.com/lichess-org/lifat repos/lifat
+      git -C repos/lila submodule update --init
   - command: |
       ./lila-docker start
       ./lila-docker gitpod-welcome
