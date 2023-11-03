@@ -8,7 +8,6 @@ tasks:
       git -C repos/lila submodule update --init
       touch .env
       docker compose run --rm -it lila_docker_rs bash -c "cargo build --manifest-path /mnt/Cargo.toml"
-      printenv
   - command: |
       ./lila-docker start
       ./lila-docker gitpod-welcome
