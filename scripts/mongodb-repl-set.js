@@ -12,7 +12,7 @@ rs.initiate({
             hidden: false,
             priority: 20,
             tags: {},
-            secondaryDelaySecs: 0,
+            slaveDelay: 0,
             votes: 1,
         },
         {
@@ -23,7 +23,7 @@ rs.initiate({
             hidden: false,
             priority: 0,
             tags: {},
-            secondaryDelaySecs: 86400,
+            slaveDelay: 86400,
             votes: 0,
         },
         {
@@ -34,7 +34,7 @@ rs.initiate({
             hidden: false,
             priority: 0,
             tags: {},
-            secondaryDelaySecs: 3600,
+            slaveDelay: 3600,
             votes: 0,
         },
         {
@@ -45,7 +45,7 @@ rs.initiate({
             hidden: false,
             priority: 15,
             tags: {},
-            secondaryDelaySecs: 0,
+            slaveDelay: 0,
             votes: 1,
         },
         {
@@ -56,7 +56,7 @@ rs.initiate({
             hidden: false,
             priority: 11,
             tags: {},
-            secondaryDelaySecs: 0,
+            slaveDelay: 0,
             votes: 1,
         },
         {
@@ -67,7 +67,7 @@ rs.initiate({
             hidden: false,
             priority: 0,
             tags: {},
-            secondaryDelaySecs: 3600,
+            slaveDelay: 3600,
             votes: 0,
         },
         {
@@ -78,7 +78,7 @@ rs.initiate({
             hidden: false,
             priority: 0,
             tags: {},
-            secondaryDelaySecs: 86400,
+            slaveDelay: 86400,
             votes: 0,
         },
     ],
