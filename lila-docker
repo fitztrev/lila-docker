@@ -48,13 +48,18 @@ setup_database() {
         return
     fi
 
-    while ! docker compose exec mongodb mongo --eval "db.adminCommand('ping')" > /dev/null 2>&1; do
-        echo "Waiting for mongodb to be ready..."
-        sleep 1
+    MONGO_SERVERS=("mongodb1" "mongodb2" "mongodb3" "mongodb4" "mongodb5" "mongodb6" "mongodb7")
+    for server in ${MONGO_SERVERS[@]}; do
+        while ! docker compose exec $server mongo --eval "db.adminCommand('ping')" > /dev/null 2>&1; do
+            echo "Waiting for $server to be ready..."
+            sleep 1
+        done
     done
 
+    docker compose run --rm mongodb7 mongo --host mongodb7 /scripts/mongodb-repl-set.js
+
     docker compose run --rm python python /lila-db-seed/spamdb/spamdb.py \
-        --uri=mongodb://mongodb/lichess \
+        --uri=mongodb://mongodb7/lichess \
         --drop-db \
         --password=$PASSWORD \
         --su-password=$SU_PASSWORD \
@@ -63,8 +68,8 @@ setup_database() {
         --tokens \
         --es --es-host=elasticsearch:9200
 
-    docker compose run --rm mongodb mongo --quiet --host mongodb lichess /lila/bin/mongodb/indexes.js
-    docker compose run --rm mongodb mongo --quiet --host mongodb lichess /lila/bin/mongodb/create-trophy-kinds.js
+    docker compose run --rm mongodb7 mongo --quiet --host mongodb7 lichess /lila/bin/mongodb/indexes.js
+    docker compose run --rm mongodb7 mongo --quiet --host mongodb7 lichess /lila/bin/mongodb/create-trophy-kinds.js
     docker compose run --rm python python /scripts/users.py
 }
 

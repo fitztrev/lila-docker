@@ -1,7 +1,7 @@
 from pymongo import MongoClient
 from termcolor import colored
 
-client = MongoClient("mongodb://mongodb")
+client = MongoClient("mongodb://mongodb7")
 db = client.lichess
 
 users = db.user4.find()
